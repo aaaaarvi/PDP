@@ -81,6 +81,11 @@ int main(int argc, char *argv[]) {
   if (py != 0 && py != (p2-1))
     Ny++;
   
+  // Create a block type
+  MPI_Datatype block_type;
+  MPI_Type_vector(Ny, 1, Ny, MPI_DOUBLE, &block_type);
+  MPI_Type_commit(&block_type);
+  
   // Time step and step sizes
   Nt = N_points;
   if (argc > 4)
@@ -108,9 +113,9 @@ int main(int argc, char *argv[]) {
       else if (px == (p1-1))
         x = j*dx + 1 - (Nx-1)*dx;
       else if (px < mod1)
-        x = j*dx + px*(Nx-2)*dx;
+        x = j*dx + px*(Nx-2)*dx - dx;
       else
-        x = j*dx + mod1*(Nx-1)*dx + (px-mod1)*(Nx-2)*dx;
+        x = j*dx + mod1*(Nx-1)*dx + (px-mod1)*(Nx-2)*dx - dx;
       
       // y-value
       if (py == 0)
@@ -118,9 +123,9 @@ int main(int argc, char *argv[]) {
       else if (py == (p2-1))
         y = i*dx + 1 - (Ny-1)*dx;
       else if (py < mod2)
-        y = i*dx + py*(Ny-2)*dx;
+        y = i*dx + py*(Ny-2)*dx - dx;
       else
-        y = i*dx + mod2*(Ny-1)*dx + (py-mod2)*(Ny-2)*dx;
+        y = i*dx + mod2*(Ny-1)*dx + (py-mod2)*(Ny-2)*dx - dx;
       
       // Compute initial value
       u[i*Nx + j] = initialize(x, y, 0);
@@ -172,12 +177,54 @@ int main(int argc, char *argv[]) {
     u = u_new;
     u_new = tmp;
     
-    // Send data
+    // Send data in the x-direction
+    if (p1 > 1) {
+      if (px == 0) {
+        MPI_Isend(&(u[Nx-1]), 1, block_type, 1, 0, proc_y, NULL);    // send to the right
+      } else if (px == (p1-1)) {
+        MPI_Isend(&(u[0]), 1, block_type, p1-2, 0, proc_y, NULL);    // send to the left
+      } else {
+        MPI_Isend(&(u[Nx-1]), 1, block_type, px+1, 0, proc_y, NULL); // send to the right
+        MPI_Isend(&(u[0]), 1, block_type, px-1, 0, proc_y, NULL);    // send to the left
+      }
+    }
     
+    // Send data in the y-direction
+    if (p2 > 1) {
+      if (py == 0) {
+        MPI_Isend(&(u[(Ny-1)*Nx]), Nx, MPI_DOUBLE, 1, 0, proc_x, NULL);    // send upwards
+      } else if (py == (p2-1)) {
+        MPI_Isend(&(u[0]), Nx, MPI_DOUBLE, p2-2, 0, proc_x, NULL);         // send downwards
+      } else {
+        MPI_Isend(&(u[(Ny-1)*Nx]), Nx, MPI_DOUBLE, py+1, 0, proc_x, NULL); // send upwards
+        MPI_Isend(&(u[0]), Nx, MPI_DOUBLE, py-1, 0, proc_x, NULL);         // send downwards
+      }
+    }
     
-    // Receive data
+    // Receive data in the x-direction
+    if (p1 > 1) {
+      if (px == 0) {
+        MPI_Recv(&(u[Nx-1]), 1, block_type, 1, 0, proc_y, NULL);    // receive from the right
+      } else if (px == (p1-1)) {
+        MPI_Recv(&(u[0]), 1, block_type, p1-2, 0, proc_y, NULL);    // receive from the left
+      } else {
+        MPI_Recv(&(u[Nx-1]), 1, block_type, px+1, 0, proc_y, NULL); // receive the right
+        MPI_Recv(&(u[0]), 1, block_type, px-1, 0, proc_y, NULL);    // receive the left
+      }
+    }
     
-
+    // Receive data in the y-direction
+    if (p2 > 1) {
+      if (py == 0) {
+        MPI_Recv(&(u[(Ny-1)*Nx]), Nx, MPI_DOUBLE, 1, 0, proc_x, NULL);    // receive from above
+      } else if (py == (p2-1)) {
+        MPI_Recv(&(u[0]), Nx, MPI_DOUBLE, p2-2, 0, proc_x, NULL);         // receive from below
+      } else {
+        MPI_Recv(&(u[(Ny-1)*Nx]), Nx, MPI_DOUBLE, py+1, 0, proc_x, NULL); // receive from above
+        MPI_Recv(&(u[0]), Nx, MPI_DOUBLE, py-1, 0, proc_x, NULL);         // receive from below
+      }
+    }
+    
     /* Apply stencil */
     for (int i = 1; i < (Ny-1); ++i) {
       for (int j = 1; j < (Nx-1); ++j) {
@@ -214,7 +261,12 @@ int main(int argc, char *argv[]) {
   free(u);
   free(u_old);
   free(u_new);
-
+  
+  // Shut down MPI
+  MPI_Type_free(&block_type);
+  MPI_Barrier(proc_grid);
+  MPI_Finalize();
+  
   return 0;
 }
 
