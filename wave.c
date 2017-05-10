@@ -330,7 +330,7 @@ int main(int argc, char *argv[]) {
     double max_error_tot;
     MPI_Reduce(&max_error, &max_error_tot, 1, MPI_DOUBLE, MPI_MAX, 0, proc_grid);
     if (rank == 0)
-      printf("Maximum error: %g\n", max_error);
+      printf("Maximum error: %g\n", max_error_tot);
     #endif
     
   } // End simulation loop
